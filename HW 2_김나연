@@ -1,0 +1,162 @@
+import os
+import numpy as np
+from scipy.optimize import curve_fit
+import matplotlib.pyplot as plt
+#-------------------------------
+#1. 데이터 불러오기 
+#-------------------------------
+
+#현재 이 파일이 위치한 [전산물리학 26-2] 폴더에서 찾도록 설정
+os.chdir(os.path.abspath(os.path.dirname(__file__)))
+
+#에너지, 빈도수 저장 리스트 생성
+bins=[]
+count=[]
+
+#csv파일 읽기 
+with open("hist2.csv","r") as f: 
+    lines=f.readlines()
+
+for line in lines:
+    energy, frequency =line.strip().split(",")
+
+    bins.append(float(energy))
+    count.append(float(frequency))
+
+#데이터 리딩 확인 test
+print(bins[:5])
+print(count[:5])
+
+print("현재 작업 폴더:", os.getcwd())
+print("읽으려는 파일:", os.path.abspath("hist2.csv"))
+print("파일 크기:", os.path.getsize("hist2.csv"), "bytes")
+print("에너지 개수",len(bins))
+print("빈도수 개수",len(count))
+#-------------------------------
+#2. 가우시안 함수 제작
+#-------------------------------
+def gaussian(x,a,b,c):
+    return a*np.exp(-((x-b)**2/(2*c**2)))
+
+#-------------------------------
+#2. 두 입자의 가우시안 합 함수는
+#-------------------------------
+
+def two_particle(x, a1, b1, c1, a2, b2, c2):
+    return gaussian(x, a1, b1, c1) + gaussian(x, a2, b2, c2)
+#-------------------------------
+#3. 아직 함수 a,b,c 값 모른다!! 피팅하자!
+#-------------------------------
+# 데이터 set 보고 가우시안의 a,b,c 값 찍기
+#1번 가우시안 p0 추정: 1번의 경우 peak이 1100정도,, a=1000, 중심 파장 b=1 정도, 표준편차는 2보단 작아보임
+#2번 가우시안 p0 추정: 2번 peak는 568, 그때 x=1.96, =2, 1번보다 퍼져있으니 0.5로 일단 설정
+
+p0=[1000,1.0,0.2,550,2.0,0.5] 
+popt, pcov = curve_fit(two_particle, bins, count, p0=p0)
+a1, b1, c1, a2, b2, c2=popt
+
+print("1번 매개변수:", a1, b1, c1)
+print("2번 매개변수:", a2, b2, c2)
+
+# 실제 측정값을 피팅한 함수가 잘 설명하나? 비교해보자
+x_fit=np.linspace(min(bins),max(bins),500)
+
+
+y_A=gaussian(x_fit,a1,b1,c1)
+y_B=gaussian(x_fit,a2,b2,c2)
+y_fit=two_particle(x_fit,a1,b1,c1,a2,b2,c2)
+
+#plt.figure()
+#plt.plot(bins, count, 'o', label='Measured Data')
+#plt.plot(x_fit,y_A,'--',label='Particle A')
+#plt.plot(x_fit,y_B,'--',label='Particle B')
+#plt.plot(x_fit, y_fit, label='Total fit')
+
+#근데 그래프 눈으로 봐서는 이게 피팅이 맞는지 모르겠는디.
+# 결정계수 R^2 계산 (실제 측정값이랑 스펙트럼 합 total fit 피팅 함수랑 잘 맞을까..?)
+
+y_cal = two_particle(np.array(bins),
+                    a1, b1, c1, a2, b2, c2)
+
+sst = np.sum(np.power(np.array(count) - np.average(count), 2))
+sse = np.sum(np.power(np.array(count) - y_cal, 2))
+
+r2 = 1 - (sse / sst)
+
+
+#-------------------------------
+#5. 각 가우시안 함수의 면적 사다리꼴 합으로 계산, 면적비 계산
+#-------------------------------
+#근데 위의 R^2 값이 "각각의" 입자 A,B 의 가우시안 함수 피팅이 적합한지는 안말해줌.
+#각 입자의 에너지 스펙트럼 피팅을 적분해서 실제 측정값 합이랑 비교해보자
+# 일단 수치적분 함수 정의(사다리꼴 근사)
+def trap2(f,a,b,n=1000):
+    x=a
+    h=(b-a)/n
+    sm=0
+
+    for i in range(n):
+        area=(f(x)+f(x+h))*h/2
+        sm=sm+area
+        x=x+h
+
+    return sm
+
+# 각 입자별로 가우시안의 면적 계산한다. 
+# 각 입자의 가우시안 면적 계산
+area_A = trap2(
+    lambda E: gaussian(E, a1, b1, c1),
+    min(bins), max(bins)
+)
+
+area_B = trap2(
+    lambda E: gaussian(E, a2, b2, c2),
+    min(bins), max(bins)
+)
+
+area_ratio= area_A/area_B
+print("입자 A의 생성량:", area_A)
+print("입자 B의 생성량:", area_B)
+print("A/B 생성비:", area_ratio)
+
+# 실제 측정값과 피팅 사이 총합 비교 
+
+measured_total=np.sum(count)
+fitting_total=np.sum(y_cal)
+
+print("실제 측정 빈도수 합", measured_total)
+print("피팅값 합", fitting_total)
+
+difference=abs(measured_total-fitting_total)/measured_total*100
+
+print("총합 차이(%):", difference)
+
+# 그래프에 결과 표시
+plt.figure()
+
+plt.plot(bins, count, 'o', label='Measured Data')
+plt.plot(x_fit, y_A, '--', label='Particle A')
+plt.plot(x_fit, y_B, '--', label='Particle B')
+plt.plot(x_fit, y_fit, label='Total fit')
+
+# 그래프에 계산 결과 표시
+plt.text(
+    1.45, 1050,
+    f"R^2 = {r2:.4f}\n"
+    f"Measured count = {measured_total:.1f}\n"
+    f"Fitted count = {fitting_total:.1f}\n"
+    f"Difference = {difference:.2f}%\n"
+    f"Area A = {area_A:.1f}\n"
+    f"Area B = {area_B:.1f}\n"
+    f"A/B ratio = {area_ratio:.3f}",
+    fontsize=9,
+    verticalalignment='top',
+    bbox=dict(facecolor='white', alpha=0.8)
+)
+
+plt.xlabel('Energy')
+plt.ylabel('Count')
+plt.title('Gaussian Fitting')
+plt.grid(True)
+plt.legend()
+plt.show()
